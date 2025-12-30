@@ -19,7 +19,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class StatRestClient {
@@ -94,17 +93,18 @@ public class StatRestClient {
     }
 
     private URI makeUri(String path) {
-        ServiceInstance instance = pickInstance();
+        ServiceInstance instance = getInstance();
         return URI.create("http://" + instance.getHost() + ":" + instance.getPort() + path);
     }
 
-    private ServiceInstance pickInstance() {
-        List<ServiceInstance> instances = discoveryClient.getInstances(serviceName);
-        if (instances == null || instances.isEmpty()) {
-            throw new IllegalStateException("No instances found for service '" + serviceName + "'. " +
-                    "Check discovery (Eureka) registration and stats.serviceName property.");
+    private ServiceInstance getInstance() {
+        try {
+            return discoveryClient
+                    .getInstances(serviceName)
+                    .getFirst();
+        } catch (Exception exception) {
+            throw new RuntimeException(exception);
         }
-        return instances.get(ThreadLocalRandom.current().nextInt(instances.size()));
     }
 
     private static String safeBody(ClientHttpResponse resp) {
