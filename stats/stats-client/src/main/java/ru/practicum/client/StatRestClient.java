@@ -20,7 +20,7 @@ public class StatRestClient{
     private final DiscoveryClient discoveryClient;
     private final RestClient restClient;
 
-    @Value("${stats.serviceName}")
+    @Value("${stats.serviceName:stats-server}")
     private String serviceName;
 
     public StatRestClient(DiscoveryClient discoveryClient) {
