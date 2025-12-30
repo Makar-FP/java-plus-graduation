@@ -4,7 +4,6 @@ server:
 spring:
   cloud:
     gateway:
-      discovery.locator.enabled: true
       routes:
         - id: stats_server_route
           uri: lb://stats-server
@@ -14,4 +13,4 @@ spring:
         - id: main_service_route
           uri: lb://main-service
           predicates:
-            - Path=/**
+            - Path=/admin/**,/categories/**,/compilations/**,/events/**,/users/**
