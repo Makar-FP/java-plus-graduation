@@ -2,16 +2,26 @@ server:
   port: 8080
 
 spring:
+  application:
+    name: gateway
   cloud:
     gateway:
-      discovery.locator.enabled: true
+      discovery:
+        locator:
+          enabled: true
       routes:
         - id: stats_server_route
           uri: lb://stats-server
           predicates:
-            - Path=/hit, /stats
+            - Path=/hit/**,/stats/**
 
         - id: main_service_route
           uri: lb://main-service
           predicates:
             - Path=/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
