@@ -1,1 +1,2 @@
-stats.serviceName=stats-server
+stats:
+  serviceName: stats-server
