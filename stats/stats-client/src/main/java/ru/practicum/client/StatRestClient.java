@@ -25,20 +25,16 @@ public class StatRestClient {
 
     private final DiscoveryClient discoveryClient;
     private final RestClient restClient;
-    private final String serviceName;
+
+    @Value("${stats.serviceName}")
+    private String serviceName;
 
     public StatRestClient(
-            DiscoveryClient discoveryClient,
-            @Value("${stats.serviceName}") String serviceName
+            DiscoveryClient discoveryClient
     ) {
         this.discoveryClient = discoveryClient;
-        this.serviceName = serviceName;
 
-        this.restClient = RestClient.builder()
-                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
-                    setConnectTimeout((int) Duration.ofSeconds(2).toMillis());
-                    setReadTimeout((int) Duration.ofSeconds(3).toMillis());
-                }})
+        restClient = RestClient.builder()
                 .build();
     }
 
@@ -98,13 +94,11 @@ public class StatRestClient {
     }
 
     private ServiceInstance getInstance() {
-        try {
-            return discoveryClient
-                    .getInstances(serviceName)
-                    .getFirst();
-        } catch (Exception exception) {
-            throw new RuntimeException(exception);
+        List<ServiceInstance> instances = discoveryClient.getInstances(serviceName);
+        if (instances == null || instances.isEmpty()) {
+            throw new IllegalStateException("No instances found for service: " + serviceName);
         }
+        return instances.get(0);
     }
 
     private static String safeBody(ClientHttpResponse resp) {
