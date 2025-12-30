@@ -29,7 +29,7 @@ public class EventMapper {
         eventFullDto.setRequestModeration(event.getRequestModeration());
         eventFullDto.setState(event.getState());
         eventFullDto.setTitle(event.getTitle());
-        eventFullDto.setViews(event.getViews());
+        eventFullDto.setViews(event.getViews() == null ? 0 : event.getViews());
 
         return eventFullDto;
     }
@@ -44,7 +44,7 @@ public class EventMapper {
         eventShortDto.setInitiator(new UserShortDto(event.getInitiator().getId(), event.getInitiator().getName()));
         eventShortDto.setPaid(event.getPaid());
         eventShortDto.setTitle(event.getTitle());
-        eventShortDto.setViews(event.getViews());
+        eventShortDto.setViews(event.getViews() == null ? 0 : event.getViews());
 
         return eventShortDto;
     }

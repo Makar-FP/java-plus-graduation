@@ -120,14 +120,32 @@ public class EventServiceImpl implements EventService {
         if (event.isEmpty() || !event.get().getState().equals(EventState.PUBLISHED)) {
             throw new EventNotFoundException(eventId);
         }
-        List<StatsDto> stats = statClient.getStats("1900-01-01 00:00:00", "2100-01-01 00:00:00", List.of("/events/" + eventId), true);
-        if (stats.isEmpty()) {
-            event.get().setViews(event.get().getViews() + 1);
-            eventRepository.save(event.get());
+
+        statClient.saveHit(new HitDto(
+                "ewm-main-service",
+                "/events/" + eventId,
+                params.getIpAdr(),
+                LocalDateTime.now()
+        ));
+
+        List<StatsDto> stats = statClient.getStats(
+                "1900-01-01 00:00:00",
+                "2100-01-01 00:00:00",
+                List.of("/events/" + eventId),
+                true
+        );
+
+        int views = 0;
+        if (stats != null && !stats.isEmpty() && stats.get(0) != null && stats.get(0).getHits() != null) {
+            views = stats.get(0).getHits().intValue();
         }
-        statClient.saveHit(new HitDto("ewm-main-service", "/events/" + eventId, params.getIpAdr(), LocalDateTime.now()));
+
+        event.get().setViews(views);
+        eventRepository.save(event.get());
+
         return mapper.toEventFullDto(event.get());
     }
+
 
     @Override
     public EventFullDto getByIdPrivate(Long userId, Long eventId) {
