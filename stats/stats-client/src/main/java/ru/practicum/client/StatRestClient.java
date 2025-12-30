@@ -10,7 +10,6 @@ import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 import ru.practicum.dto.HitDto;
 import ru.practicum.dto.StatsDto;
@@ -26,21 +25,23 @@ public class StatRestClient {
     private final DiscoveryClient discoveryClient;
     private final RestClient restClient;
 
-    @Value("${stats.serviceName}")
+    @Value("${stats.serviceName:stats-server}")
     private String serviceName;
 
-    public StatRestClient(
-            DiscoveryClient discoveryClient
-    ) {
+    public StatRestClient(DiscoveryClient discoveryClient) {
         this.discoveryClient = discoveryClient;
 
-        restClient = RestClient.builder()
+        this.restClient = RestClient.builder()
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout((int) Duration.ofSeconds(2).toMillis());
+                    setReadTimeout((int) Duration.ofSeconds(3).toMillis());
+                }})
                 .build();
     }
 
     public void saveHit(HitDto hitDto) {
-        URI uri = makeUri("/hit");
         try {
+            URI uri = makeUri("/hit");
             restClient.post()
                     .uri(uri)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -51,30 +52,29 @@ public class StatRestClient {
                         throw new RuntimeException("Stats saveHit failed: " + resp.getStatusCode() + " body=" + body);
                     })
                     .toBodilessEntity();
-        } catch (RestClientResponseException ex) {
-            throw new RuntimeException("Stats saveHit failed: " + ex.getRawStatusCode() + " body=" + ex.getResponseBodyAsString(), ex);
+        } catch (Exception ignored) {
         }
     }
 
     public List<StatsDto> getStats(String start, String end, List<String> uris, boolean unique) {
-        URI base = makeUri("/stats");
+        try {
+            URI base = makeUri("/stats");
 
-        UriComponentsBuilder b = UriComponentsBuilder.fromUri(base)
-                .queryParam("start", start)
-                .queryParam("end", end)
-                .queryParam("unique", unique);
+            UriComponentsBuilder b = UriComponentsBuilder.fromUri(base)
+                    .queryParam("start", start)
+                    .queryParam("end", end)
+                    .queryParam("unique", unique);
 
-        if (uris != null) {
-            for (String u : uris) {
-                if (u != null && !u.isBlank()) {
-                    b.queryParam("uris", u);
+            if (uris != null) {
+                for (String u : uris) {
+                    if (u != null && !u.isBlank()) {
+                        b.queryParam("uris", u);
+                    }
                 }
             }
-        }
 
-        URI uri = b.build(true).toUri();
+            URI uri = b.build(true).toUri();
 
-        try {
             return restClient.get()
                     .uri(uri)
                     .retrieve()
@@ -83,8 +83,8 @@ public class StatRestClient {
                         throw new RuntimeException("Stats getStats failed: " + resp.getStatusCode() + " body=" + body);
                     })
                     .body(new ParameterizedTypeReference<List<StatsDto>>() {});
-        } catch (RestClientResponseException ex) {
-            throw new RuntimeException("Stats getStats failed: " + ex.getRawStatusCode() + " body=" + ex.getResponseBodyAsString(), ex);
+        } catch (Exception e) {
+            return List.of();
         }
     }
 
@@ -109,5 +109,4 @@ public class StatRestClient {
             return "<unreadable>";
         }
     }
-
 }
