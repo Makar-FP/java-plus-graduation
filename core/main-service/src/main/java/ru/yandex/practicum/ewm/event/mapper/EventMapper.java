@@ -8,6 +8,8 @@ import ru.yandex.practicum.ewm.event.model.*;
 import ru.yandex.practicum.ewm.user.model.User;
 import ru.yandex.practicum.ewm.user.dto.UserShortDto;
 
+import java.time.LocalDateTime;
+
 @Component
 @RequiredArgsConstructor
 public class EventMapper {
@@ -71,8 +73,12 @@ public class EventMapper {
         if (eventDto.getParticipantLimit() != null) {
             curEvent.setParticipantLimit(eventDto.getParticipantLimit());
         }
+
         if (eventDto.getStateAction() != null && eventDto.getStateAction().equals(EventStateAction.PUBLISH_EVENT)) {
             curEvent.setState(EventState.PUBLISHED);
+            if (curEvent.getPublishedOn() == null) {
+                curEvent.setPublishedOn(LocalDateTime.now().withNano(0));
+            }
         }
         if (eventDto.getStateAction() != null && eventDto.getStateAction().equals(EventStateAction.REJECT_EVENT)) {
             curEvent.setState(EventState.CANCELED);
@@ -83,7 +89,6 @@ public class EventMapper {
 
         return curEvent;
     }
-
     public Event toEventFromUpdateUser(EventUpdateUserDto eventDto, Category updCategory, Event curEvent) {
 
         if (eventDto.getAnnotation() != null) {
