@@ -1,52 +1,119 @@
 package ru.practicum.client;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.client.ServiceInstance;
+import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Component;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 import ru.practicum.dto.HitDto;
 import ru.practicum.dto.StatsDto;
 
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
-@Component
+@Service
 public class StatRestClient {
 
+    private final DiscoveryClient discoveryClient;
     private final RestClient restClient;
+    private final String serviceName;
 
-    public StatRestClient(RestClient restClient) {
-        this.restClient = restClient;
+    public StatRestClient(
+            DiscoveryClient discoveryClient,
+            @Value("${stats.serviceName}") String serviceName
+    ) {
+        this.discoveryClient = discoveryClient;
+        this.serviceName = serviceName;
+
+        this.restClient = RestClient.builder()
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory() {{
+                    setConnectTimeout((int) Duration.ofSeconds(2).toMillis());
+                    setReadTimeout((int) Duration.ofSeconds(3).toMillis());
+                }})
+                .build();
     }
 
     public void saveHit(HitDto hitDto) {
-        restClient.post()
-                .uri("/hit")
-                .body(hitDto)
-                .retrieve()
-                .onStatus(
-                        status -> status != HttpStatus.CREATED,
-                        (request, response) -> {
-                            throw new RuntimeException("Не удалось сохранить Hit: " + response.getStatusCode());
-                        }
-                )
-                .toBodilessEntity();
+        URI uri = makeUri("/hit");
+        try {
+            restClient.post()
+                    .uri(uri)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(hitDto)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (req, resp) -> {
+                        String body = safeBody(resp);
+                        throw new RuntimeException("Stats saveHit failed: " + resp.getStatusCode() + " body=" + body);
+                    })
+                    .toBodilessEntity();
+        } catch (RestClientResponseException ex) {
+            throw new RuntimeException("Stats saveHit failed: " + ex.getRawStatusCode() + " body=" + ex.getResponseBodyAsString(), ex);
+        }
     }
-
 
     public List<StatsDto> getStats(String start, String end, List<String> uris, boolean unique) {
-        String url = UriComponentsBuilder.fromHttpUrl("http://stats-server:9090/stats")
+        URI base = makeUri("/stats");
+
+        UriComponentsBuilder b = UriComponentsBuilder.fromUri(base)
                 .queryParam("start", start)
                 .queryParam("end", end)
-                .queryParam("uris", uris != null && !uris.isEmpty() ? String.join(",", uris) : null)
-                .queryParam("unique", unique)
-                .build()
-                .toUriString();
+                .queryParam("unique", unique);
 
-        return restClient.get()
-                .uri(url)
-                .retrieve()
-                .body(new ParameterizedTypeReference<List<StatsDto>>() {
-                });
+        if (uris != null) {
+            for (String u : uris) {
+                if (u != null && !u.isBlank()) {
+                    b.queryParam("uris", u);
+                }
+            }
+        }
+
+        URI uri = b.build(true).toUri();
+
+        try {
+            return restClient.get()
+                    .uri(uri)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (req, resp) -> {
+                        String body = safeBody(resp);
+                        throw new RuntimeException("Stats getStats failed: " + resp.getStatusCode() + " body=" + body);
+                    })
+                    .body(new ParameterizedTypeReference<List<StatsDto>>() {});
+        } catch (RestClientResponseException ex) {
+            throw new RuntimeException("Stats getStats failed: " + ex.getRawStatusCode() + " body=" + ex.getResponseBodyAsString(), ex);
+        }
     }
+
+    private URI makeUri(String path) {
+        ServiceInstance instance = pickInstance();
+        return URI.create("http://" + instance.getHost() + ":" + instance.getPort() + path);
+    }
+
+    private ServiceInstance pickInstance() {
+        List<ServiceInstance> instances = discoveryClient.getInstances(serviceName);
+        if (instances == null || instances.isEmpty()) {
+            throw new IllegalStateException("No instances found for service '" + serviceName + "'. " +
+                    "Check discovery (Eureka) registration and stats.serviceName property.");
+        }
+        return instances.get(ThreadLocalRandom.current().nextInt(instances.size()));
+    }
+
+    private static String safeBody(ClientHttpResponse resp) {
+        try {
+            if (resp.getBody() == null) return "";
+            return StreamUtils.copyToString(resp.getBody(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return "<unreadable>";
+        }
+    }
+
 }
