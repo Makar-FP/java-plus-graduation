@@ -38,7 +38,7 @@ public class RequestPrivateController {
                 .body(requests);
     }
 
-    @PatchMapping("{requestId}/cancel")
+    @PatchMapping("/{requestId}/cancel")
     public ResponseEntity<RequestDto> update(@PathVariable Long userId,
                                              @PathVariable Long requestId) {
         RequestDto requestDto = requestService.update(userId, requestId);
