@@ -1,0 +1,16 @@
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: stats_server_route
+          uri: lb://stats-server
+          predicates:
+            - Path=/hit,/stats
+
+        - id: main_service_route
+          uri: lb://main-service
+          predicates:
+            - Path=/admin/**,/categories/**,/compilations/**,/events/**,/users/**
