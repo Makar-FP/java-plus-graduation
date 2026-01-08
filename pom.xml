@@ -15,10 +15,6 @@
 		<module>stats</module>
 		<module>infra</module>
 		<module>core</module>
-        <module>core/event-service</module>
-		<module>core/comment-service</module>
-        <module>core/request-service</module>
-        <module>core/user-service</module>
     </modules>
 
 	<groupId>ru.practicum</groupId>
