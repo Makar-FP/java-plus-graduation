@@ -53,6 +53,7 @@ public class EventMapper {
             curEvent.setAnnotation(eventDto.getAnnotation());
         }
         curEvent.setCategory(updCategory);
+
         if (eventDto.getDescription() != null) {
             curEvent.setDescription(eventDto.getDescription());
         }
@@ -60,8 +61,8 @@ public class EventMapper {
             curEvent.setEventDate(eventDto.getEventDate());
         }
         if (eventDto.getLocation() != null) {
-            curEvent.setLat(eventDto.getLocation().lat);
-            curEvent.setLon(eventDto.getLocation().lon);
+            curEvent.setLat(eventDto.getLocation().getLat());
+            curEvent.setLon(eventDto.getLocation().getLon());
         }
         if (eventDto.getPaid() != null) {
             curEvent.setPaid(eventDto.getPaid());
@@ -88,6 +89,7 @@ public class EventMapper {
             curEvent.setAnnotation(eventDto.getAnnotation());
         }
         curEvent.setCategory(updCategory);
+
         if (eventDto.getDescription() != null) {
             curEvent.setDescription(eventDto.getDescription());
         }
@@ -95,8 +97,8 @@ public class EventMapper {
             curEvent.setEventDate(eventDto.getEventDate());
         }
         if (eventDto.getLocation() != null) {
-            curEvent.setLat(eventDto.getLocation().lat);
-            curEvent.setLon(eventDto.getLocation().lon);
+            curEvent.setLat(eventDto.getLocation().getLat());
+            curEvent.setLon(eventDto.getLocation().getLon());
         }
         if (eventDto.getParticipantLimit() != null) {
             curEvent.setParticipantLimit(eventDto.getParticipantLimit());
@@ -121,8 +123,8 @@ public class EventMapper {
                 .description(eventDto.getDescription())
                 .createdOn(eventDto.getCreated())
                 .eventDate(eventDto.getEventDate())
-                .lat(eventDto.getLocation().lat)
-                .lon(eventDto.getLocation().lon)
+                .lat(eventDto.getLocation().getLat())
+                .lon(eventDto.getLocation().getLon())
                 .paid(eventDto.getPaid())
                 .participantLimit(eventDto.getParticipantLimit())
                 .requestModeration(eventDto.getRequestModeration())
@@ -141,8 +143,8 @@ public class EventMapper {
                 .description(eventDto.getDescription())
                 .createdOn(eventDto.getCreatedOn())
                 .eventDate(eventDto.getEventDate())
-                .lat(eventDto.getLocation().lat)
-                .lon(eventDto.getLocation().lon)
+                .lat(eventDto.getLocation().getLat())
+                .lon(eventDto.getLocation().getLon())
                 .paid(eventDto.getPaid())
                 .participantLimit(eventDto.getParticipantLimit())
                 .requestModeration(eventDto.getRequestModeration())

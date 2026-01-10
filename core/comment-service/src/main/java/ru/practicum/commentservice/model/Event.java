@@ -14,9 +14,9 @@ public class Event {
 
     private String annotation;
 
-    private Category category;
+    private Long categoryId;
 
-    private Integer confirmedRequests;
+    private Long confirmedRequests;
 
     private LocalDateTime createdOn;
 
@@ -26,9 +26,9 @@ public class Event {
 
     private Long initiatorId;
 
-    public Float lat;
+    private Float lat;
 
-    public Float lon;
+    private Float lon;
 
     private Boolean paid;
 
@@ -42,5 +42,5 @@ public class Event {
 
     private String title;
 
-    private Integer views;
+    private Long views;
 }

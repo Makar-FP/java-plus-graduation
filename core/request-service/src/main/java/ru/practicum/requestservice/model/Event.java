@@ -1,6 +1,8 @@
 package ru.practicum.requestservice.model;
 
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
@@ -8,12 +10,11 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @NoArgsConstructor
 public class Event {
-
     private Long id;
 
     private String annotation;
 
-    private Category category;
+    private Long categoryId;
 
     private Integer confirmedRequests;
 
@@ -25,9 +26,9 @@ public class Event {
 
     private Long initiatorId;
 
-    public Float lat;
+    private Float lat;
 
-    public Float lon;
+    private Float lon;
 
     private Boolean paid;
 
@@ -35,11 +36,12 @@ public class Event {
 
     private LocalDateTime publishedOn;
 
-    private Boolean requestModeration = true;
+    private Boolean requestModeration;
 
     private EventState state;
 
     private String title;
 
     private Integer views;
+
 }

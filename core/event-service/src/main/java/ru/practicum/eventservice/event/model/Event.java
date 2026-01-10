@@ -14,24 +14,26 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @NoArgsConstructor
 @Entity
-@Builder
 @Table(name = "events")
+@Builder(toBuilder = true)
 public class Event {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "annotation", nullable = false, length = 2000)
+    @Column(name = "annotation", length = 2000)
     private String annotation;
 
     @ManyToOne
     @JoinColumn(name = "category_id")
     private Category category;
 
-    @Column(name = "confirmed_requests")
+    @Column(name = "confirmed_requests", nullable = false)
+    @ColumnDefault("0")
     private Integer confirmedRequests;
 
-    @Column(name = "created")
+    @Column(name = "created_on", nullable = false)
     private LocalDateTime createdOn;
 
     @Column(name = "description", length = 7000)
@@ -40,14 +42,14 @@ public class Event {
     @Column(name = "event_date", nullable = false)
     private LocalDateTime eventDate;
 
-    @JoinColumn(name = "initiator_id", nullable = false)
+    @Column(name = "initiator_id", nullable = false)
     private Long initiatorId;
 
     @Column(name = "location_lat")
-    public Float lat;
+    private Float lat;
 
     @Column(name = "location_lon")
-    public Float lon;
+    private Float lon;
 
     @Column(name = "paid", nullable = false)
     @ColumnDefault("false")
@@ -62,7 +64,7 @@ public class Event {
 
     @Column(name = "request_moderation")
     @ColumnDefault("true")
-    private Boolean requestModeration = true;
+    private Boolean requestModeration;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "state")
@@ -72,6 +74,7 @@ public class Event {
     private String title;
 
     @Column(name = "views")
+    @ColumnDefault("0")
     private Integer views;
 
     @PrePersist
