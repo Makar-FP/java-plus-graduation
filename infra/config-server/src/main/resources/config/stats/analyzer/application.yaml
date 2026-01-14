@@ -7,7 +7,7 @@ analyzer:
         "enable.auto.commit": false
         "group.id": "stats.analyzer.useractions"
         "key.deserializer": "org.apache.kafka.common.serialization.StringDeserializer"
-        "value.deserializer": "ru.practicum.stats.analyzer.configuration.UserActionDeserializer"
+        "value.deserializer": "ru.practicum.stats.analyzer.config.UserActionDeserializer"
       topic: "stats.user-actions.v1"
       poll-timeout: 100ms
 
@@ -17,7 +17,7 @@ analyzer:
         "enable.auto.commit": false
         "group.id": "stats.analyzer.similarity"
         "key.deserializer": "org.apache.kafka.common.serialization.StringDeserializer"
-        "value.deserializer": "ru.practicum.stats.analyzer.configuration.EventSimilarityDeserializer"
+        "value.deserializer": "ru.practicum.stats.analyzer.config.EventSimilarityDeserializer"
       topic: "stats.events-similarity.v1"
       poll-timeout: 100ms
 
