@@ -1,31 +1,28 @@
 package ru.practicum.commentservice.model;
 
-
 import jakarta.persistence.*;
 import lombok.*;
-import lombok.experimental.FieldDefaults;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "comments")
-@Data
-@Builder
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@FieldDefaults(level = AccessLevel.PRIVATE)
 public class Comment {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    Long id;
+    private Long id;
 
-    LocalDateTime created;
+    private LocalDateTime created;
 
     @Column(name = "event_id")
-    Long eventId;
+    private Long eventId;
 
     @Column(name = "user_id")
-    Long userId;
+    private Long userId;
 
-    String text;
+    private String text;
 }

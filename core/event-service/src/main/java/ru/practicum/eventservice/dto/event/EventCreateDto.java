@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import ru.practicum.eventservice.event.model.Location;
@@ -13,6 +14,7 @@ import ru.practicum.eventservice.event.model.Location;
 import java.time.LocalDateTime;
 
 @Data
+@Builder
 @AllArgsConstructor
 @NoArgsConstructor
 public class EventCreateDto {
@@ -46,5 +48,5 @@ public class EventCreateDto {
     @Size(max = 120, min = 3, message = "Title length must be between 3 and 120 characters")
     private String title;
 
-    private Integer views = 0;
+    private Double rating = 0D;
 }

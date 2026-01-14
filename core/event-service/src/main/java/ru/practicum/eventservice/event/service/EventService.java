@@ -5,8 +5,10 @@ import ru.practicum.eventservice.dto.request.RequestEventDto;
 import ru.practicum.eventservice.event.model.AdminEventParams;
 import ru.practicum.eventservice.event.model.PrivateEventParams;
 import ru.practicum.eventservice.event.model.PublicEventParams;
+import ru.practicum.grpc.stats.recommendations.RecommendedEventProto;
 
 import java.util.List;
+import java.util.Set;
 
 public interface EventService {
         List<EventFullDto> getAdmin(AdminEventParams params);
@@ -15,7 +17,7 @@ public interface EventService {
 
         List<EventShortDto> getPrivate(PrivateEventParams params);
 
-        EventFullDto getByIdPublic(Long eventId, PublicEventParams params);
+        EventFullDto getByIdPublic(Long userId, Long eventId, PublicEventParams params);
 
         EventFullDto getByIdPrivate(Long userId, Long eventId);
 
@@ -32,4 +34,12 @@ public interface EventService {
         List<RequestEventDto> getRequestsByIdPrivate(Long userId, Long eventId);
 
         EventResultRequestStatusDto updateRequestStatusPrivate(Long userId, Long eventId, EventUpdateRequestStatusDto updateDto);
+
+        EventFullDto setLike(Long eventId, Long userId);
+
+        List<EventFullDto> getRecommendations(Long userId, int maxResults);
+
+        List<RecommendedEventProto> getInteractions(Set<Long> eventsIds);
+
+        List<EventFullDto> getSimilarEvents(Long eventId, Long userId, int maxResults);
 }

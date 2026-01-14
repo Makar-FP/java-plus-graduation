@@ -38,11 +38,10 @@ public class RequestServiceImpl implements RequestService {
         }
         EventFullDto event;
         try {
-            event = eventClient.getById(eventId);
+            event = eventClient.getById(userId, eventId);
         } catch (Exception e) {
             throw new ConflictException("You cannot register in an unpublished event.");
         }
-
         if (event == null) {
             throw new EventNotFoundException(eventId);
         }

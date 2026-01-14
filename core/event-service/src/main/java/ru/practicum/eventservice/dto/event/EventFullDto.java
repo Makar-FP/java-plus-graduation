@@ -13,7 +13,7 @@ import ru.practicum.eventservice.event.model.Location;
 import java.time.LocalDateTime;
 
 @Data
-@Builder(toBuilder = true)
+@Builder
 @AllArgsConstructor
 @NoArgsConstructor
 public class EventFullDto {
@@ -35,6 +35,5 @@ public class EventFullDto {
     private Boolean requestModeration;
     private EventState state;
     private String title;
-    private Integer views;
-
+    private Double rating;
 }
