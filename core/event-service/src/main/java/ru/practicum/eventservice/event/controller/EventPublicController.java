@@ -60,14 +60,15 @@ public class EventPublicController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<EventFullDto> getById(@RequestHeader("X-EWM-USER-ID") long userId,
-                                                @PathVariable("id") Long eventId,
-                                                HttpServletRequest request) {
+    public ResponseEntity<EventFullDto> getById(
+            @RequestHeader(value = "X-EWM-USER-ID", required = false) Long userId,
+            @PathVariable("id") Long eventId,
+            HttpServletRequest request) {
 
         PublicEventParams publicEventParams = new PublicEventParams();
         publicEventParams.setIpAdr(request.getRemoteAddr());
 
-        log.info("--> GET /events/{} request for user {}", eventId, userId);
+        log.info("--> GET /events/{} request, userId={}", eventId, userId);
         EventFullDto event = eventService.getByIdPublic(userId, eventId, publicEventParams);
         log.info("<-- GET /events/{} response: {}", eventId, event);
 

@@ -8,6 +8,8 @@ import ru.practicum.eventservice.dto.user.UserRequestDto;
 import ru.practicum.eventservice.dto.user.UserShortDto;
 import ru.practicum.eventservice.event.model.*;
 
+import java.time.LocalDateTime;
+
 @Component
 @RequiredArgsConstructor
 public class EventMapper {
@@ -72,6 +74,9 @@ public class EventMapper {
         }
         if (eventDto.getStateAction() != null && eventDto.getStateAction().equals(EventStateAction.PUBLISH_EVENT)) {
             curEvent.setState(EventState.PUBLISHED);
+            if (curEvent.getPublishedOn() == null) {
+                curEvent.setPublishedOn(LocalDateTime.now());
+            }
         }
         if (eventDto.getStateAction() != null && eventDto.getStateAction().equals(EventStateAction.REJECT_EVENT)) {
             curEvent.setState(EventState.CANCELED);

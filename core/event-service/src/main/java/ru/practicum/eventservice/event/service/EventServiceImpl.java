@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 import ru.practicum.client.CollectorClient;
 import ru.practicum.client.RecommendationClient;
 import ru.practicum.eventservice.category.model.Category;
-import ru.practicum.eventservice.category.model.QCategory;
 import ru.practicum.eventservice.category.repo.CategoryRepository;
 import ru.practicum.eventservice.client.RequestClient;
 import ru.practicum.eventservice.client.UserClient;
@@ -113,7 +112,7 @@ public class EventServiceImpl implements EventService {
         Page<Event> pageEvents = eventRepository.findAll(filter, pageRequest);
         List<Event> foundEvents = pageEvents.getContent();
         if (foundEvents.isEmpty()) {
-            throw new EventsGetPublicBadRequestException();
+            return List.of();
         }
 
         List<Long> userIds = foundEvents.stream().map(Event::getInitiatorId).toList();
@@ -155,34 +154,35 @@ public class EventServiceImpl implements EventService {
     @Override
     @Transactional
     public EventFullDto getByIdPublic(Long userId, Long eventId, PublicEventParams params) {
-        Optional<Event> event = eventRepository.findById(eventId);
-        if (event.isEmpty() || !event.get().getState().equals(EventState.PUBLISHED)) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new EventNotFoundException(eventId));
+
+        if (!EventState.PUBLISHED.equals(event.getState())) {
             throw new EventNotFoundException(eventId);
         }
 
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
-        if (user == null) {
-            throw new UserNotFoundException(userId);
+        UserRequestDto initiator = getUserOrThrow(event.getInitiatorId());
+
+        if (userId != null) {
+            Instant now = Instant.now();
+            grpcUserActionClient.sendUserActionToCollector(UserActionProto.newBuilder()
+                    .setUserId(userId.intValue())
+                    .setEventId(eventId.intValue())
+                    .setActionTypeValue(0) // VIEW
+                    .setTimestamp(com.google.protobuf.Timestamp.newBuilder()
+                            .setSeconds(now.getEpochSecond())
+                            .setNanos(now.getNano())
+                            .build())
+                    .build());
         }
 
-        Instant now = Instant.now();
-        grpcUserActionClient.sendUserActionToCollector(UserActionProto.newBuilder()
-                .setUserId(userId.intValue())
-                .setEventId(eventId.intValue())
-                .setActionTypeValue(0)
-                .setTimestamp(com.google.protobuf.Timestamp.newBuilder()
-                        .setSeconds(now.getEpochSecond())
-                        .setNanos(now.getNano())
-                        .build())
-                .build()
-        );
-
-        return mapper.toEventFullDto(event.get(), user);
+        return mapper.toEventFullDto(event, initiator);
     }
+
 
     @Override
     public EventFullDto getByIdPrivate(Long userId, Long eventId) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -207,7 +207,7 @@ public class EventServiceImpl implements EventService {
         }
 
         Long userId = event.get().getInitiatorId();
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -264,7 +264,7 @@ public class EventServiceImpl implements EventService {
         updEvent = eventRepository.save(updEvent);
 
         Long userId = updEvent.getInitiatorId();
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -284,13 +284,13 @@ public class EventServiceImpl implements EventService {
         updEvent = eventRepository.save(updEvent);
 
         Long userId = updEvent.getInitiatorId();
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         return mapper.toEventFullDto(updEvent, user);
     }
 
     @Override
     public EventFullDto updatePrivate(Long userId, Long eventId, EventUpdateUserDto eventDto) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -331,7 +331,7 @@ public class EventServiceImpl implements EventService {
 
     @Override
     public EventFullDto create(Long userId, EventCreateDto eventDto) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -348,7 +348,7 @@ public class EventServiceImpl implements EventService {
 
     @Override
     public List<RequestEventDto> getRequestsByIdPrivate(Long userId, Long eventId) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -369,65 +369,90 @@ public class EventServiceImpl implements EventService {
     }
 
     @Override
+    @Transactional
     public EventResultRequestStatusDto updateRequestStatusPrivate(Long userId, Long eventId, EventUpdateRequestStatusDto updateDto) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
-        if (user == null) {
-            throw new UserNotFoundException(userId);
+        getUserOrThrow(userId);
+
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new EventNotFoundException(eventId));
+
+        if (!Objects.equals(event.getInitiatorId(), userId)) {
+            throw new ConflictException("You are not the owner of this event.");
         }
 
-        Optional<Event> event = eventRepository.findById(eventId);
-        if (event.isEmpty()) {
-            throw new EventNotFoundException(eventId);
+        if (event.getParticipantLimit() == 0 || Boolean.FALSE.equals(event.getRequestModeration())) {
+            return EventResultRequestStatusDto.builder()
+                    .confirmedRequests(List.of())
+                    .rejectedRequests(List.of())
+                    .build();
         }
 
-        Integer confReqs = event.get().getConfirmedRequests();
-        Integer limit = event.get().getParticipantLimit();
-
-        if (limit == 0 || !event.get().getRequestModeration()) {
-            return null;
+        if (updateDto == null || updateDto.getRequestIds() == null || updateDto.getRequestIds().isEmpty()) {
+            return EventResultRequestStatusDto.builder()
+                    .confirmedRequests(List.of())
+                    .rejectedRequests(List.of())
+                    .build();
         }
 
-        if (Objects.equals(confReqs, limit) && updateDto.getStatus().equals(RequestStatus.CONFIRMED)) {
-            throw new DataIntegrityViolationException("The participant limit has been reached");
+        int limit = event.getParticipantLimit();
+        int confirmed = event.getConfirmedRequests() == null ? 0 : event.getConfirmedRequests();
+
+        if (RequestStatus.CONFIRMED.equals(updateDto.getStatus()) && confirmed >= limit) {
+            throw new ConflictException("The participant limit has been reached");
         }
 
-        int count = limit - confReqs;
-        int counter = 0;
-
-        List<RequestEventDto> confirmedRequests = new ArrayList<>();
-        List<RequestEventDto> rejectedRequests = new ArrayList<>();
+        List<RequestEventDto> confirmedDtos = new ArrayList<>();
+        List<RequestEventDto> rejectedDtos = new ArrayList<>();
 
         List<Request> requests = requestClient.getByEventIdAndIds(eventId, updateDto.getRequestIds());
-        for (Request request : requests) {
-            if (!request.getStatus().equals(RequestStatus.PENDING)) {
-                throw new DataIntegrityViolationException("Request must have status PENDING");
+
+        for (Request r : requests) {
+            if (!RequestStatus.PENDING.equals(r.getStatus())) {
+                throw new ConflictException("Request must have status PENDING");
             }
 
-            if (updateDto.getStatus().equals(RequestStatus.CONFIRMED) && counter < count) {
-                counter++;
-                request.setStatus(RequestStatus.CONFIRMED);
-                requestClient.updateInternal(request);
-                confirmedRequests.add(RequestMapper.toEventRequestDto(request));
+            if (RequestStatus.REJECTED.equals(updateDto.getStatus())) {
+                r.setStatus(RequestStatus.REJECTED);
+                requestClient.updateInternal(r);
+                rejectedDtos.add(RequestMapper.toEventRequestDto(r));
+                continue;
+            }
+
+            if (confirmed < limit) {
+                r.setStatus(RequestStatus.CONFIRMED);
+                requestClient.updateInternal(r);
+                confirmedDtos.add(RequestMapper.toEventRequestDto(r));
+                confirmed++;
             } else {
-                counter++;
-                request.setStatus(RequestStatus.REJECTED);
-                requestClient.updateInternal(request);
-                rejectedRequests.add(RequestMapper.toEventRequestDto(request));
+                r.setStatus(RequestStatus.REJECTED);
+                requestClient.updateInternal(r);
+                rejectedDtos.add(RequestMapper.toEventRequestDto(r));
             }
         }
 
-        event.get().setConfirmedRequests(confReqs + counter);
-        eventRepository.save(event.get());
+        event.setConfirmedRequests(confirmed);
+        eventRepository.save(event);
 
-        EventResultRequestStatusDto results = new EventResultRequestStatusDto();
-        results.setConfirmedRequests(confirmedRequests);
-        results.setRejectedRequests(rejectedRequests);
-        return results;
+        if (confirmed >= limit) {
+            List<Request> all = requestClient.getByEventId(eventId);
+            for (Request r : all) {
+                if (RequestStatus.PENDING.equals(r.getStatus())) {
+                    r.setStatus(RequestStatus.REJECTED);
+                    requestClient.updateInternal(r);
+                    rejectedDtos.add(RequestMapper.toEventRequestDto(r));
+                }
+            }
+        }
+
+        return EventResultRequestStatusDto.builder()
+                .confirmedRequests(confirmedDtos)
+                .rejectedRequests(rejectedDtos)
+                .build();
     }
 
     @Override
     public EventFullDto setLike(Long eventId, Long userId) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -454,7 +479,7 @@ public class EventServiceImpl implements EventService {
 
     @Override
     public List<EventFullDto> getRecommendations(Long userId, int maxResults) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -479,7 +504,7 @@ public class EventServiceImpl implements EventService {
 
     @Override
     public List<EventFullDto> getSimilarEvents(Long eventId, Long userId, int maxResults) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -503,8 +528,8 @@ public class EventServiceImpl implements EventService {
     }
 
     private BooleanExpression byCategoryIds(Set<Long> categories) {
-        return categories != null && !categories.isEmpty() && categories.iterator().next() != 0
-                ? QCategory.category.id.in(categories)
+        return categories != null && !categories.isEmpty()
+                ? QEvent.event.category.id.in(categories)
                 : null;
     }
 
@@ -521,15 +546,20 @@ public class EventServiceImpl implements EventService {
     }
 
     private BooleanExpression byDatesWithDefaults(LocalDateTime start, LocalDateTime end) {
-        return start != null && end != null
-                ? QEvent.event.eventDate.after(start).and(QEvent.event.eventDate.before(end))
-                : QEvent.event.eventDate.after(LocalDateTime.now());
+        LocalDateTime actualStart = (start != null) ? start : LocalDateTime.now();
+        if (end == null) {
+            return QEvent.event.eventDate.after(actualStart);
+        }
+        return QEvent.event.eventDate.after(actualStart).and(QEvent.event.eventDate.before(end));
     }
 
+
     private BooleanExpression byText(String text) {
-        return text != null && !text.equals("0")
-                ? QEvent.event.annotation.containsIgnoreCase(text)
-                : null;
+        if (text == null || text.isBlank() || "0".equals(text)) {
+            return null;
+        }
+        return QEvent.event.annotation.containsIgnoreCase(text)
+                .or(QEvent.event.description.containsIgnoreCase(text));
     }
 
     private BooleanExpression byPaid(Boolean paid) {
@@ -542,7 +572,18 @@ public class EventServiceImpl implements EventService {
 
     private BooleanExpression byOnlyAvailable(Boolean onlyAvailable) {
         return onlyAvailable != null && onlyAvailable
-                ? QEvent.event.confirmedRequests.lt(QEvent.event.participantLimit)
+                ? QEvent.event.participantLimit.eq(0)
+                .or(QEvent.event.confirmedRequests.lt(QEvent.event.participantLimit))
                 : null;
     }
+
+
+    private UserRequestDto getUserOrThrow(Long userId) {
+        List<UserRequestDto> users = userClient.getUsersById(List.of(userId));
+        if (users == null || users.isEmpty()) {
+            throw new UserNotFoundException(userId);
+        }
+        return users.get(0);
+    }
+
 }
