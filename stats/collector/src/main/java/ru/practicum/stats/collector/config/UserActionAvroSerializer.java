@@ -30,6 +30,5 @@ public class UserActionAvroSerializer implements Serializer<SpecificRecordBase> 
             throw new SerializationException("Error with topic serialization [" + topic + "]", ex);
         }
     }
-
 }
 
