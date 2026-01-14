@@ -30,8 +30,17 @@ public class RecommendationClient {
                 .setMaxResults(maxResults)
                 .build();
 
-        Iterator<RecommendedEventProto> results = clientStub.getSimilarEvents(request);
-        return asStream(results);
+        try {
+            if (clientStub == null) {
+                log.warn("Analyzer gRPC stub is not initialized. Returning empty recommendations.");
+                return Stream.empty();
+            }
+            Iterator<RecommendedEventProto> results = clientStub.getSimilarEvents(request);
+            return asStream(results);
+        } catch (Exception e) {
+            log.warn("Failed to call analyzer#getSimilarEvents. Returning empty. Error: {}", e.getMessage(), e);
+            return Stream.empty();
+        }
     }
 
     public Stream<RecommendedEventProto> getInteractionsCount(List<Long> eventIds) {

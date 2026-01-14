@@ -14,7 +14,17 @@ public class CollectorClient {
     private UserActionControllerGrpc.UserActionControllerBlockingStub collectorStub;
 
     public void sendUserActionToCollector(UserActionProto record) {
-        log.info("Data has been transfered: {}", record.getAllFields());
-        collectorStub.collectUserAction(record);
+        try {
+            if (collectorStub == null) {
+                log.warn("Collector gRPC stub is not initialized. Skipping user action: {}", record.getAllFields());
+                return;
+            }
+            log.info("Data has been transfered: {}", record.getAllFields());
+            collectorStub.collectUserAction(record);
+        } catch (Exception e) {
+            log.warn("Failed to send user action to collector. Skipping. Record: {}. Error: {}",
+                    record.getAllFields(), e.getMessage(), e);
+        }
     }
+
 }

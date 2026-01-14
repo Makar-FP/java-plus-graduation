@@ -12,6 +12,7 @@ import ru.practicum.eventservice.dto.event.EventShortDto;
 import ru.practicum.eventservice.event.model.EventPublicSort;
 import ru.practicum.eventservice.event.model.PublicEventParams;
 import ru.practicum.eventservice.event.service.EventService;
+import ru.practicum.eventservice.exception.EventsGetPublicBadRequestException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -36,6 +37,16 @@ public class EventPublicController {
             @RequestParam(defaultValue = "0") int from,
             @RequestParam(defaultValue = "10") int size,
             HttpServletRequest request) {
+
+        if (from < 0) {
+            throw new EventsGetPublicBadRequestException();
+        }
+        if (size <= 0) {
+            throw new EventsGetPublicBadRequestException();
+        }
+        if (rangeStart != null && rangeEnd != null && rangeEnd.isBefore(rangeStart)) {
+            throw new EventsGetPublicBadRequestException();
+        }
 
         PublicEventParams publicEventParams = new PublicEventParams();
         publicEventParams.setText(text);
