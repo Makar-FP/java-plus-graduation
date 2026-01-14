@@ -27,7 +27,7 @@ public class UserActionAvroSerializer implements Serializer<SpecificRecordBase> 
             }
             return result;
         } catch (IOException ex) {
-            throw new SerializationException("Ошибка сериализации данных для топика [" + topic + "]", ex);
+            throw new SerializationException("Error with topic serialization [" + topic + "]", ex);
         }
     }
 
