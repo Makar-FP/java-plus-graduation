@@ -5,7 +5,7 @@ collector:
       properties:
         "bootstrap.servers": ${collector.kafka.bootstrap-servers}
         "key.serializer": "org.apache.kafka.common.serialization.StringSerializer"
-        "value.serializer": "ru.practicum.stats.collector.configuration.UserActionAvroSerializer"
+        "value.serializer": "ru.practicum.stats.collector.config.UserActionAvroSerializer"
       topic: "stats.user-actions.v1"
 
 grpc:
