@@ -1,8 +1,6 @@
 package ru.practicum.commentservice.service;
 
-import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
-import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Page;
@@ -29,20 +27,19 @@ import java.util.Objects;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@FieldDefaults(level = AccessLevel.PRIVATE)
 public class CommentServiceImpl implements CommentService {
 
-    final CommentRepository commentRepository;
+    private final CommentRepository commentRepository;
     private final EventClient eventClient;
     private final UserClient userClient;
-    final CommentMapper commentMapper;
+    private final CommentMapper commentMapper;
 
     @Override
     public CommentDtoResponse create(Long userId, Long eventId, CommentDtoRequest dto) {
         EventFullDto event = getPublishedEvent(eventId);
         UserRequestDto user = getUser(userId);
-        Comment comment = commentRepository.save(commentMapper.toEntity(dto, event, user, LocalDateTime.now()));
-        return commentMapper.toDto(comment, user, event);
+        Comment comment = commentRepository.save(CommentMapper.toEntity(dto, event, user, LocalDateTime.now()));
+        return CommentMapper.toDto(comment, user, event);
     }
 
     @Override
@@ -52,7 +49,7 @@ public class CommentServiceImpl implements CommentService {
         comment.setText(dto.getText());
         UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
 
-        return commentMapper.toDto(commentRepository.save(comment), user, event);
+        return CommentMapper.toDto(commentRepository.save(comment), user, event);
     }
 
     @Override
@@ -67,7 +64,7 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new CommentNotFoundException(commentId));
 
         UserRequestDto user = userClient.getUsersById(List.of(comment.getUserId())).getFirst();
-        return commentMapper.toDto(comment, user, getEvent(comment.getEventId()));
+        return CommentMapper.toDto(comment, user, getEvent(comment.getEventId()));
     }
 
     @Override
@@ -75,7 +72,7 @@ public class CommentServiceImpl implements CommentService {
         EventFullDto event = getEvent(eventId);
         List<Comment> comments = commentRepository.findAllByEventId(eventId);
         return comments.stream()
-                .map(c -> commentMapper.toDto(c, userClient.getUsersById(List.of(c.getUserId())).getFirst(), event))
+                .map(c -> CommentMapper.toDto(c, userClient.getUsersById(List.of(c.getUserId())).getFirst(), event))
                 .toList();
     }
 
@@ -85,7 +82,7 @@ public class CommentServiceImpl implements CommentService {
         validateUserExists(userId);
         List<Comment> comments = commentRepository.findAllByEventId(eventId);
         return comments.stream()
-                .map(c -> commentMapper.toDto(c, userClient.getUsersById(List.of(userId)).getFirst(), event))
+                .map(c -> CommentMapper.toDto(c, userClient.getUsersById(List.of(userId)).getFirst(), event))
                 .toList();
     }
 
@@ -97,7 +94,7 @@ public class CommentServiceImpl implements CommentService {
 
         BooleanExpression filter;
         Page<Comment> pageComments;
-        if (rangeStart == null || rangeEnd == null) {
+        if (rangeStart == null || rangeEnd ==null) {
             pageComments = commentRepository.findAll(pageRequest);
         } else {
             filter = byDates(rangeStart, rangeEnd);
@@ -107,7 +104,7 @@ public class CommentServiceImpl implements CommentService {
         List<Comment> comments = pageComments.getContent();
 
         return comments.stream()
-                .map(c -> commentMapper.toDto(c, userClient.getUsersById(List.of(c.getUserId())).getFirst(), getEvent(c.getEventId())))
+                .map(c -> CommentMapper.toDto(c, userClient.getUsersById(List.of(c.getUserId())).getFirst(), getEvent(c.getEventId())))
                 .toList();
     }
 

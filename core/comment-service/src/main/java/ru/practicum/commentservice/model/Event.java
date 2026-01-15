@@ -14,9 +14,9 @@ public class Event {
 
     private String annotation;
 
-    private Long categoryId;
+    private Category category;
 
-    private Long confirmedRequests;
+    private Integer confirmedRequests;
 
     private LocalDateTime createdOn;
 
@@ -42,5 +42,5 @@ public class Event {
 
     private String title;
 
-    private Long views;
+    private Double rating;
 }

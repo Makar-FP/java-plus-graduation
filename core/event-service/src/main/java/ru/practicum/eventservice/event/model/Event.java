@@ -11,11 +11,11 @@ import ru.practicum.eventservice.category.model.Category;
 import java.time.LocalDateTime;
 
 @Data
+@Builder
 @AllArgsConstructor
 @NoArgsConstructor
 @Entity
 @Table(name = "events")
-@Builder(toBuilder = true)
 public class Event {
 
     @Id
@@ -73,9 +73,8 @@ public class Event {
     @Column(name = "title", nullable = false, length = 120)
     private String title;
 
-    @Column(name = "views")
-    @ColumnDefault("0")
-    private Integer views;
+    @Column(name = "rating")
+    private Double rating;
 
     @PrePersist
     public void prePersist() {

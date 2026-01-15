@@ -1,6 +1,7 @@
 package ru.practicum.eventservice.event.service;
 
 import com.querydsl.core.types.dsl.BooleanExpression;
+import jakarta.transaction.Transactional;
 import lombok.AllArgsConstructor;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -8,12 +9,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import ru.practicum.client.StatRestClient;
-import ru.practicum.dto.HitDto;
-import ru.practicum.dto.StatsDto;
+import ru.practicum.client.CollectorClient;
+import ru.practicum.client.RecommendationClient;
 import ru.practicum.eventservice.category.model.Category;
-import ru.practicum.eventservice.category.model.QCategory;
-import ru.practicum.eventservice.event.model.QEvent;
 import ru.practicum.eventservice.category.repo.CategoryRepository;
 import ru.practicum.eventservice.client.RequestClient;
 import ru.practicum.eventservice.client.UserClient;
@@ -27,7 +25,10 @@ import ru.practicum.eventservice.exception.*;
 import ru.practicum.eventservice.request.mapper.RequestMapper;
 import ru.practicum.eventservice.request.model.Request;
 import ru.practicum.eventservice.request.model.RequestStatus;
+import ru.practicum.grpc.stats.recommendations.RecommendedEventProto;
+import ru.practicum.grpc.stats.useraction.UserActionProto;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -42,13 +43,16 @@ public class EventServiceImpl implements EventService {
     private final RequestClient requestClient;
     private final UserClient userClient;
     private final EventMapper mapper;
-
-    StatRestClient statClient;
+    private final CollectorClient grpcUserActionClient;
+    private final RecommendationClient grpcEventSimilarityClient;
 
     @Override
     public List<EventFullDto> getAdmin(AdminEventParams params) {
 
-        PageRequest pageRequest = PageRequest.of(params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0, params.getSize());
+        PageRequest pageRequest = PageRequest.of(
+                params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0,
+                params.getSize()
+        );
 
         BooleanExpression filter = byStates(params.getStates())
                 .and(byCategoryIds(params.getCategories()))
@@ -74,14 +78,28 @@ public class EventServiceImpl implements EventService {
         PageRequest pageRequest;
         if (params.getSort() != null) {
             if (params.getSort().equals(EventPublicSort.EVENT_DATE)) {
-                pageRequest = PageRequest.of(params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0, params.getSize(), Sort.by("eventDate"));
-            } else if (params.getSort().equals(EventPublicSort.VIEWS)) {
-                pageRequest = PageRequest.of(params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0, params.getSize(), Sort.by("views"));
+                pageRequest = PageRequest.of(
+                        params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0,
+                        params.getSize(),
+                        Sort.by("eventDate")
+                );
+            } else if (params.getSort().equals(EventPublicSort.RATING)) {
+                pageRequest = PageRequest.of(
+                        params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0,
+                        params.getSize(),
+                        Sort.by("rating")
+                );
             } else {
-                pageRequest = PageRequest.of(params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0, params.getSize());
+                pageRequest = PageRequest.of(
+                        params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0,
+                        params.getSize()
+                );
             }
         } else {
-            pageRequest = PageRequest.of(params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0, params.getSize());
+            pageRequest = PageRequest.of(
+                    params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0,
+                    params.getSize()
+            );
         }
 
         BooleanExpression filter = byPublishedEvents()
@@ -94,9 +112,8 @@ public class EventServiceImpl implements EventService {
         Page<Event> pageEvents = eventRepository.findAll(filter, pageRequest);
         List<Event> foundEvents = pageEvents.getContent();
         if (foundEvents.isEmpty()) {
-            throw new EventsGetPublicBadRequestException();
+            return List.of();
         }
-        statClient.saveHit(new HitDto("ewm-main-service", "/events", params.getIpAdr(), LocalDateTime.now()));
 
         List<Long> userIds = foundEvents.stream().map(Event::getInitiatorId).toList();
         Map<Long, UserRequestDto> users = userClient.getUsersById(userIds)
@@ -115,7 +132,11 @@ public class EventServiceImpl implements EventService {
             throw new UserNotFoundException(params.getUserId());
         }
 
-        PageRequest pageRequest = PageRequest.of(params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0, params.getSize());
+        PageRequest pageRequest = PageRequest.of(
+                params.getFrom() > 0 ? params.getFrom() / params.getSize() : 0,
+                params.getSize()
+        );
+
         BooleanExpression filter = byUserIds(Set.of(params.getUserId()));
         Page<Event> pageEvents = eventRepository.findAll(filter, pageRequest);
         List<Event> foundEvents = pageEvents.getContent();
@@ -131,41 +152,50 @@ public class EventServiceImpl implements EventService {
     }
 
     @Override
-    public EventFullDto getByIdPublic(Long eventId, PublicEventParams params) {
-        Optional<Event> event = eventRepository.findById(eventId);
-        if (event.isEmpty() || !event.get().getState().equals(EventState.PUBLISHED)) {
+    @Transactional
+    public EventFullDto getByIdPublic(Long userId, Long eventId, PublicEventParams params) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new EventNotFoundException(eventId));
+
+        if (!EventState.PUBLISHED.equals(event.getState())) {
             throw new EventNotFoundException(eventId);
         }
 
-        List<StatsDto> stats = statClient.getStats("1900-01-01 00:00:00", "2100-01-01 00:00:00", List.of("/events/" + eventId), true);
-        if (stats.isEmpty()) {
-            event.get().setViews(event.get().getViews() + 1);
-            eventRepository.save(event.get());
-        }
-        statClient.saveHit(new HitDto("ewm-main-service", "/events/" + eventId, params.getIpAdr(), LocalDateTime.now()));
+        UserRequestDto initiator = getUserOrThrow(event.getInitiatorId());
 
-        Long userId = event.get().getInitiatorId();
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
-        if (user == null) {
-            throw new UserNotFoundException(userId);
+        if (userId != null) {
+            Instant now = Instant.now();
+            grpcUserActionClient.sendUserActionToCollector(UserActionProto.newBuilder()
+                    .setUserId(userId.intValue())
+                    .setEventId(eventId.intValue())
+                    .setActionTypeValue(0) // VIEW
+                    .setTimestamp(com.google.protobuf.Timestamp.newBuilder()
+                            .setSeconds(now.getEpochSecond())
+                            .setNanos(now.getNano())
+                            .build())
+                    .build());
         }
 
-        return mapper.toEventFullDto(event.get(), user);
+        return mapper.toEventFullDto(event, initiator);
     }
+
 
     @Override
     public EventFullDto getByIdPrivate(Long userId, Long eventId) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
+
         Optional<Event> event = eventRepository.findById(eventId);
         if (event.isEmpty()) {
             throw new EventNotFoundException(eventId);
         }
+
         if (!Objects.equals(event.get().getInitiatorId(), userId)) {
             throw new EventGetBadRequestException(eventId, userId);
         }
+
         return mapper.toEventFullDto(event.get(), user);
     }
 
@@ -175,8 +205,9 @@ public class EventServiceImpl implements EventService {
         if (event.isEmpty()) {
             throw new EventNotFoundException(eventId);
         }
+
         Long userId = event.get().getInitiatorId();
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -190,6 +221,7 @@ public class EventServiceImpl implements EventService {
         if (event.isEmpty()) {
             throw new EventNotFoundException(eventId);
         }
+
         Optional<Category> category;
         if (eventDto.getCategory() != null && !eventDto.getCategory().equals(event.get().getCategory().getId())) {
             category = categoryRepository.findById(eventDto.getCategory());
@@ -199,23 +231,40 @@ public class EventServiceImpl implements EventService {
         } else {
             category = Optional.of(event.get().getCategory());
         }
+
         if (eventDto.getEventDate() != null && eventDto.getEventDate().isBefore(LocalDateTime.now())) {
-            throw new EventDateException("Изменение даты события не может быть на уже наступившую.");
+            throw new EventDateException("The event date cannot be moved to the past.");
         }
-        if (eventDto.getEventDate() != null && event.get().getPublishedOn() != null && eventDto.getEventDate().isBefore(event.get().getPublishedOn().minus(1, ChronoUnit.HOURS))) {
-            throw new DataIntegrityViolationException("Дата начала изменяемого события должна быть не ранее чем за час от даты публикации.");
+
+        if (eventDto.getEventDate() != null
+                && event.get().getPublishedOn() != null
+                && eventDto.getEventDate().isBefore(event.get().getPublishedOn().minus(1, ChronoUnit.HOURS))) {
+            throw new DataIntegrityViolationException(
+                    "The start date of the updated event must be at least one hour from the publication time."
+            );
         }
-        if (eventDto.getStateAction() != null && eventDto.getStateAction().equals(EventStateAction.PUBLISH_EVENT) && !event.get().getState().equals(EventState.PENDING)) {
-            throw new DataIntegrityViolationException("Событие можно публиковать, только если оно в состоянии ожидания публикации");
+
+        if (eventDto.getStateAction() != null
+                && eventDto.getStateAction().equals(EventStateAction.PUBLISH_EVENT)
+                && !event.get().getState().equals(EventState.PENDING)) {
+            throw new DataIntegrityViolationException(
+                    "An event can be published only if it is in the PENDING state."
+            );
         }
-        if (eventDto.getStateAction() != null && eventDto.getStateAction().equals(EventStateAction.REJECT_EVENT) && event.get().getState().equals(EventState.PUBLISHED)) {
-            throw new DataIntegrityViolationException("Событие можно отклонить, только если оно еще не опубликовано");
+
+        if (eventDto.getStateAction() != null
+                && eventDto.getStateAction().equals(EventStateAction.REJECT_EVENT)
+                && event.get().getState().equals(EventState.PUBLISHED)) {
+            throw new DataIntegrityViolationException(
+                    "An event can be rejected only if it has not been published yet."
+            );
         }
+
         Event updEvent = mapper.toEventFromUpdateAdmin(eventDto, category.get(), event.get());
         updEvent = eventRepository.save(updEvent);
 
         Long userId = updEvent.getInitiatorId();
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -229,24 +278,28 @@ public class EventServiceImpl implements EventService {
         if (event.isEmpty()) {
             throw new EventNotFoundException(eventId);
         }
+
         Event updEvent = mapper.toEventFromEventFullDto(eventDto);
         updEvent.setId(eventId);
         updEvent = eventRepository.save(updEvent);
+
         Long userId = updEvent.getInitiatorId();
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         return mapper.toEventFullDto(updEvent, user);
     }
 
     @Override
     public EventFullDto updatePrivate(Long userId, Long eventId, EventUpdateUserDto eventDto) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
+
         Optional<Event> event = eventRepository.findById(eventId);
         if (event.isEmpty()) {
             throw new EventNotFoundException(eventId);
         }
+
         Optional<Category> category;
         if (eventDto.getCategory() != null && !eventDto.getCategory().equals(event.get().getCategory().getId())) {
             category = categoryRepository.findById(eventDto.getCategory());
@@ -256,15 +309,21 @@ public class EventServiceImpl implements EventService {
         } else {
             category = Optional.of(event.get().getCategory());
         }
+
         if (!Objects.equals(event.get().getInitiatorId(), userId)) {
             throw new EventGetBadRequestException(eventId, userId);
         }
+
         if (eventDto.getEventDate() != null && eventDto.getEventDate().minusHours(2).isBefore(LocalDateTime.now())) {
-            throw new EventDateException("Дата и время на которые намечено событие не может быть раньше, чем через два часа от текущего момента.");
+            throw new EventDateException("The event date and time must be at least 2 hours from now.");
         }
+
         if (event.get().getState().equals(EventState.PUBLISHED)) {
-            throw new DataIntegrityViolationException("Изменить можно только отмененные события или события в состоянии ожидания модерации.");
+            throw new DataIntegrityViolationException(
+                    "You can update only canceled events or events waiting for moderation."
+            );
         }
+
         Event updEvent = mapper.toEventFromUpdateUser(eventDto, category.get(), event.get());
         updEvent = eventRepository.save(updEvent);
         return mapper.toEventFullDto(updEvent, user);
@@ -272,14 +331,16 @@ public class EventServiceImpl implements EventService {
 
     @Override
     public EventFullDto create(Long userId, EventCreateDto eventDto) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
+
         Optional<Category> category = categoryRepository.findById(eventDto.getCategory());
         if (category.isEmpty()) {
             throw new CategoryNotFoundException(eventDto.getCategory());
         }
+
         Event event = mapper.toEventFromCreatedDto(eventDto, user, category.get());
         event = eventRepository.save(event);
         return mapper.toEventFullDto(event, user);
@@ -287,18 +348,20 @@ public class EventServiceImpl implements EventService {
 
     @Override
     public List<RequestEventDto> getRequestsByIdPrivate(Long userId, Long eventId) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
+
         Optional<Event> event = eventRepository.findById(eventId);
         if (event.isEmpty()) {
             throw new EventNotFoundException(eventId);
         }
 
         if (!event.get().getInitiatorId().equals(userId)) {
-            throw new ConflictException("Вы не являетесь владельцем данного события");
+            throw new ConflictException("You are not the owner of this event.");
         }
+
         List<Request> requests = requestClient.getByEventId(eventId);
         return requests.stream()
                 .map(RequestMapper::toEventRequestDto)
@@ -306,78 +369,197 @@ public class EventServiceImpl implements EventService {
     }
 
     @Override
+    @Transactional
     public EventResultRequestStatusDto updateRequestStatusPrivate(Long userId, Long eventId, EventUpdateRequestStatusDto updateDto) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        getUserOrThrow(userId);
+
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new EventNotFoundException(eventId));
+
+        if (!Objects.equals(event.getInitiatorId(), userId)) {
+            throw new ConflictException("You are not the owner of this event.");
+        }
+
+        if (event.getParticipantLimit() == 0 || Boolean.FALSE.equals(event.getRequestModeration())) {
+            return EventResultRequestStatusDto.builder()
+                    .confirmedRequests(List.of())
+                    .rejectedRequests(List.of())
+                    .build();
+        }
+
+        if (updateDto == null || updateDto.getRequestIds() == null || updateDto.getRequestIds().isEmpty()) {
+            return EventResultRequestStatusDto.builder()
+                    .confirmedRequests(List.of())
+                    .rejectedRequests(List.of())
+                    .build();
+        }
+
+        int limit = event.getParticipantLimit();
+        int confirmed = event.getConfirmedRequests() == null ? 0 : event.getConfirmedRequests();
+
+        if (RequestStatus.CONFIRMED.equals(updateDto.getStatus()) && confirmed >= limit) {
+            throw new ConflictException("The participant limit has been reached");
+        }
+
+        List<RequestEventDto> confirmedDtos = new ArrayList<>();
+        List<RequestEventDto> rejectedDtos = new ArrayList<>();
+
+        List<Request> requests = requestClient.getByEventIdAndIds(eventId, updateDto.getRequestIds());
+
+        for (Request r : requests) {
+            if (!RequestStatus.PENDING.equals(r.getStatus())) {
+                throw new ConflictException("Request must have status PENDING");
+            }
+
+            if (RequestStatus.REJECTED.equals(updateDto.getStatus())) {
+                r.setStatus(RequestStatus.REJECTED);
+                requestClient.updateInternal(r);
+                rejectedDtos.add(RequestMapper.toEventRequestDto(r));
+                continue;
+            }
+
+            if (confirmed < limit) {
+                r.setStatus(RequestStatus.CONFIRMED);
+                requestClient.updateInternal(r);
+                confirmedDtos.add(RequestMapper.toEventRequestDto(r));
+                confirmed++;
+            } else {
+                r.setStatus(RequestStatus.REJECTED);
+                requestClient.updateInternal(r);
+                rejectedDtos.add(RequestMapper.toEventRequestDto(r));
+            }
+        }
+
+        event.setConfirmedRequests(confirmed);
+        eventRepository.save(event);
+
+        if (confirmed >= limit) {
+            List<Request> all = requestClient.getByEventId(eventId);
+            for (Request r : all) {
+                if (RequestStatus.PENDING.equals(r.getStatus())) {
+                    r.setStatus(RequestStatus.REJECTED);
+                    requestClient.updateInternal(r);
+                    rejectedDtos.add(RequestMapper.toEventRequestDto(r));
+                }
+            }
+        }
+
+        return EventResultRequestStatusDto.builder()
+                .confirmedRequests(confirmedDtos)
+                .rejectedRequests(rejectedDtos)
+                .build();
+    }
+
+    @Override
+    public EventFullDto setLike(Long eventId, Long userId) {
+        UserRequestDto user = getUserOrThrow(userId);;
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
+
         Optional<Event> event = eventRepository.findById(eventId);
         if (event.isEmpty()) {
             throw new EventNotFoundException(eventId);
         }
-        Integer confReqs = event.get().getConfirmedRequests();
-        Integer limit = event.get().getParticipantLimit();
-        if (limit == 0 || !event.get().getRequestModeration()) {
-            return null;
-        }
-        if (Objects.equals(confReqs, limit) && updateDto.getStatus().equals(RequestStatus.CONFIRMED)) {
-            throw new DataIntegrityViolationException("The participant limit has been reached");
-        }
-        int count = limit - confReqs;
-        int counter = 0;
-        List<RequestEventDto> confirmedRequests = new ArrayList<>();
-        List<RequestEventDto> rejectedRequests = new ArrayList<>();
-        List<Request> requests = requestClient.getByEventIdAndIds(eventId, updateDto.getRequestIds());
-        for (Request request : requests) {
-            if (!request.getStatus().equals(RequestStatus.PENDING)) {
-                throw new DataIntegrityViolationException("Request must have status PENDING");
-            }
-            if (updateDto.getStatus().equals(RequestStatus.CONFIRMED) && counter < count) {
-                counter++;
-                request.setStatus(RequestStatus.CONFIRMED);
-                requestClient.updateInternal(request);
-                RequestEventDto requestDto = RequestMapper.toEventRequestDto(request);
-                confirmedRequests.add(requestDto);
-            } else {
-                counter++;
-                request.setStatus(RequestStatus.REJECTED);
-                requestClient.updateInternal(request);
-                RequestEventDto requestDto = RequestMapper.toEventRequestDto(request);
-                rejectedRequests.add(requestDto);
-            }
-        }
-        event.get().setConfirmedRequests(confReqs + counter);
-        eventRepository.save(event.get());
 
+        Instant now = Instant.now();
+        grpcUserActionClient.sendUserActionToCollector(UserActionProto.newBuilder()
+                .setUserId(userId.intValue())
+                .setEventId(eventId.intValue())
+                .setActionTypeValue(2)
+                .setTimestamp(com.google.protobuf.Timestamp.newBuilder()
+                        .setSeconds(now.getEpochSecond())
+                        .setNanos(now.getNano())
+                        .build())
+                .build()
+        );
 
-        EventResultRequestStatusDto results = new EventResultRequestStatusDto();
-        results.setConfirmedRequests(confirmedRequests);
-        results.setRejectedRequests(rejectedRequests);
-        return results;
+        return mapper.toEventFullDto(event.get(), user);
+    }
+
+    @Override
+    public List<EventFullDto> getRecommendations(Long userId, int maxResults) {
+        UserRequestDto user = getUserOrThrow(userId);;
+        if (user == null) {
+            throw new UserNotFoundException(userId);
+        }
+
+        List<RecommendedEventProto> recommendedEventProtoList =
+                grpcEventSimilarityClient.getRecommendationsForUser(userId, maxResults).toList();
+
+        Set<Long> events = recommendedEventProtoList.stream()
+                .map(RecommendedEventProto::getEventId)
+                .collect(Collectors.toSet());
+
+        return eventRepository.findByIdIn(events).stream()
+                .map(event -> mapper.toEventFullDto(event, user))
+                .toList();
+    }
+
+    @Override
+    public List<RecommendedEventProto> getInteractions(Set<Long> eventsIds) {
+        List<Long> events = new ArrayList<>(eventsIds);
+        return grpcEventSimilarityClient.getInteractionsCount(events).toList();
+    }
+
+    @Override
+    public List<EventFullDto> getSimilarEvents(Long eventId, Long userId, int maxResults) {
+        UserRequestDto user = getUserOrThrow(userId);;
+        if (user == null) {
+            throw new UserNotFoundException(userId);
+        }
+
+        List<RecommendedEventProto> similarEventsProtoList =
+                grpcEventSimilarityClient.getSimilarEvents(eventId, userId, maxResults).toList();
+
+        Set<Long> events = similarEventsProtoList.stream()
+                .map(RecommendedEventProto::getEventId)
+                .collect(Collectors.toSet());
+
+        return eventRepository.findByIdIn(events).stream()
+                .map(event -> mapper.toEventFullDto(event, user))
+                .toList();
     }
 
     private BooleanExpression byStates(Set<EventState> states) {
-        return states != null ? QEvent.event.state.in(states) : QEvent.event.state.in(Set.of(EventState.CANCELED, EventState.PENDING, EventState.PUBLISHED));
+        return states != null
+                ? QEvent.event.state.in(states)
+                : QEvent.event.state.in(Set.of(EventState.CANCELED, EventState.PENDING, EventState.PUBLISHED));
     }
 
     private BooleanExpression byCategoryIds(Set<Long> categories) {
-        return categories != null && !categories.isEmpty() && categories.iterator().next() != 0 ? QCategory.category.id.in(categories) : null;
+        return categories != null && !categories.isEmpty()
+                ? QEvent.event.category.id.in(categories)
+                : null;
     }
 
     private BooleanExpression byUserIds(Set<Long> users) {
-        return users != null && !users.isEmpty() && users.iterator().next() != 0 ? QEvent.event.initiatorId.in(users) : null;
+        return users != null && !users.isEmpty() && users.iterator().next() != 0
+                ? QEvent.event.initiatorId.in(users)
+                : null;
     }
 
     private BooleanExpression byDates(LocalDateTime start, LocalDateTime end) {
-        return start != null && end != null ? QEvent.event.eventDate.after(start).and(QEvent.event.eventDate.before(end)) : null;
+        return start != null && end != null
+                ? QEvent.event.eventDate.after(start).and(QEvent.event.eventDate.before(end))
+                : null;
     }
 
     private BooleanExpression byDatesWithDefaults(LocalDateTime start, LocalDateTime end) {
-        return start != null && end != null ? QEvent.event.eventDate.after(start).and(QEvent.event.eventDate.before(end)) : QEvent.event.eventDate.after(LocalDateTime.now());
+        LocalDateTime actualStart = (start != null) ? start : LocalDateTime.now();
+        if (end == null) {
+            return QEvent.event.eventDate.after(actualStart);
+        }
+        return QEvent.event.eventDate.after(actualStart).and(QEvent.event.eventDate.before(end));
     }
 
+
     private BooleanExpression byText(String text) {
-        return text != null && !text.equals("0") ? QEvent.event.annotation.containsIgnoreCase(text) : null;
+        if (text == null || text.isBlank() || "0".equals(text)) {
+            return null;
+        }
+        return QEvent.event.annotation.containsIgnoreCase(text)
+                .or(QEvent.event.description.containsIgnoreCase(text));
     }
 
     private BooleanExpression byPaid(Boolean paid) {
@@ -389,7 +571,19 @@ public class EventServiceImpl implements EventService {
     }
 
     private BooleanExpression byOnlyAvailable(Boolean onlyAvailable) {
-        return onlyAvailable != null && onlyAvailable ? QEvent.event.confirmedRequests.lt(QEvent.event.participantLimit) : null;
+        return onlyAvailable != null && onlyAvailable
+                ? QEvent.event.participantLimit.eq(0)
+                .or(QEvent.event.confirmedRequests.lt(QEvent.event.participantLimit))
+                : null;
+    }
+
+
+    private UserRequestDto getUserOrThrow(Long userId) {
+        List<UserRequestDto> users = userClient.getUsersById(List.of(userId));
+        if (users == null || users.isEmpty()) {
+            throw new UserNotFoundException(userId);
+        }
+        return users.get(0);
     }
 
 }

@@ -6,11 +6,8 @@ import ru.practicum.requestservice.client.EventClient;
 import ru.practicum.requestservice.client.UserClient;
 import ru.practicum.requestservice.dto.EventFullDto;
 import ru.practicum.requestservice.dto.UserRequestDto;
-import ru.practicum.requestservice.exception.CompilationNotFoundException;
-import ru.practicum.requestservice.exception.ConflictException;
-import ru.practicum.requestservice.exception.EventNotFoundException;
+import ru.practicum.requestservice.exception.*;
 import ru.practicum.requestservice.dto.RequestDto;
-import ru.practicum.requestservice.exception.UserNotFoundException;
 import ru.practicum.requestservice.mapper.RequestMapper;
 import ru.practicum.requestservice.model.EventState;
 import ru.practicum.requestservice.model.Request;
@@ -32,58 +29,62 @@ public class RequestServiceImpl implements RequestService {
 
     @Override
     public RequestDto create(Long userId, Long eventId) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
-        if (user == null) {
-            throw new UserNotFoundException(userId);
-        }
+        UserRequestDto user = getUserOrThrow(userId);
+
         EventFullDto event;
         try {
-            event = eventClient.getById(eventId);
-        } catch (Exception e) {
-            throw new ConflictException("You cannot register in an unpublished event.");
+            event = eventClient.getByIdInternal(eventId);
+        } catch (feign.FeignException.NotFound e) {
+            throw new EventNotFoundException(eventId);
         }
 
         if (event == null) {
             throw new EventNotFoundException(eventId);
         }
 
-        if (user.getId().equals(event.getInitiator().getId())) {
+        if (userId.equals(event.getInitiator().getId())) {
             throw new ConflictException("You cannot register for your own event.");
         }
 
-        if (!event.getState().equals(EventState.PUBLISHED)) {
+        if (!EventState.PUBLISHED.equals(event.getState())) {
             throw new ConflictException("You cannot register in an unpublished event.");
         }
 
-        if (event.getConfirmedRequests().equals(event.getParticipantLimit()) && event.getParticipantLimit() != 0) {
+        if (requestRepository.existsByRequesterIdAndEventId(userId, eventId)) {
+            throw new ConflictException("You cannot add duplicate request.");
+        }
+
+        int confirmed = event.getConfirmedRequests() == null ? 0 : event.getConfirmedRequests();
+        int limit = event.getParticipantLimit() == null ? 0 : event.getParticipantLimit();
+
+        if (limit != 0 && confirmed >= limit) {
             throw new ConflictException("All spots are taken, registration is not possible.");
         }
+
+        RequestStatus status = (limit == 0 || Boolean.FALSE.equals(event.getRequestModeration()))
+                ? RequestStatus.CONFIRMED
+                : RequestStatus.PENDING;
 
         Request request = new Request();
         request.setRequesterId(userId);
         request.setEventId(eventId);
         request.setCreated(LocalDateTime.now());
+        request.setStatus(status);
 
-        if (!event.getRequestModeration()) {
-            request.setStatus(RequestStatus.CONFIRMED);
-            event.setConfirmedRequests(event.getConfirmedRequests() + 1);
-            EventFullDto updEvent = eventClient.updateInternal(event, eventId);
+        Request saved = requestRepository.save(request);
 
-        } else {
-            request.setStatus(RequestStatus.PENDING);
+        if (RequestStatus.CONFIRMED.equals(status)) {
+            event.setConfirmedRequests(confirmed + 1);
+            eventClient.updateInternal(event, eventId);
         }
 
-        if (event.getParticipantLimit() == 0) {
-            request.setStatus(RequestStatus.CONFIRMED);
-        }
-
-
-        return RequestMapper.toDto(requestRepository.save(request));
+        return RequestMapper.toDto(saved);
     }
+
 
     @Override
     public List<RequestDto> get(Long userId) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
+        UserRequestDto user = getUserOrThrow(userId);
         if (user == null) {
             throw new UserNotFoundException(userId);
         }
@@ -97,20 +98,23 @@ public class RequestServiceImpl implements RequestService {
 
     @Override
     public RequestDto update(Long userId, Long requestId) {
-        UserRequestDto user = userClient.getUsersById(List.of(userId)).getFirst();
-        if (user == null) {
-            throw new UserNotFoundException(userId);
-        }
+        getUserOrThrow(userId);
 
         Request request = requestRepository.findById(requestId)
-                .orElseThrow(() -> new CompilationNotFoundException(requestId));
+                .orElseThrow(() -> new RequestNotFoundException(requestId));
+
+        if (!userId.equals(request.getRequesterId())) {
+            throw new RequestNotFoundException(requestId);
+        }
+
+        if (RequestStatus.CONFIRMED.equals(request.getStatus())) {
+            throw new ConflictException("You cannot cancel an accepted request.");
+        }
 
         request.setStatus(RequestStatus.CANCELED);
-
-        return RequestMapper.toDto(
-                requestRepository.save(request)
-        );
+        return RequestMapper.toDto(requestRepository.save(request));
     }
+
 
     @Override
     public Request updateInternal(Request request) {
@@ -126,5 +130,13 @@ public class RequestServiceImpl implements RequestService {
     public List<Request> getByEventIdAndIds(Long eventId, Set<Long> requestsIds) {
         return requestRepository.findAllByEventIdAndIdIn(eventId, requestsIds);
 
+    }
+
+    private UserRequestDto getUserOrThrow(Long userId) {
+        List<UserRequestDto> users = userClient.getUsersById(List.of(userId));
+        if (users == null || users.isEmpty()) {
+            throw new UserNotFoundException(userId);
+        }
+        return users.get(0);
     }
 }

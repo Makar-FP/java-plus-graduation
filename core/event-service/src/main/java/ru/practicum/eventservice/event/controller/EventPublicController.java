@@ -12,6 +12,7 @@ import ru.practicum.eventservice.dto.event.EventShortDto;
 import ru.practicum.eventservice.event.model.EventPublicSort;
 import ru.practicum.eventservice.event.model.PublicEventParams;
 import ru.practicum.eventservice.event.service.EventService;
+import ru.practicum.eventservice.exception.EventsGetPublicBadRequestException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,7 +23,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 @RequestMapping(path = "/events")
 public class EventPublicController {
-
     private final EventService eventService;
 
     @GetMapping
@@ -30,31 +30,39 @@ public class EventPublicController {
             @RequestParam(required = false) String text,
             @RequestParam(required = false) Set<Long> categories,
             @RequestParam(required = false) Boolean paid,
-            @RequestParam(required = false)
-            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime rangeStart,
-            @RequestParam(required = false)
-            @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime rangeEnd,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime rangeStart,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime rangeEnd,
             @RequestParam(defaultValue = "false") Boolean onlyAvailable,
             @RequestParam(required = false) EventPublicSort sort,
             @RequestParam(defaultValue = "0") int from,
             @RequestParam(defaultValue = "10") int size,
-            HttpServletRequest request
-    ) {
-        PublicEventParams params = new PublicEventParams();
-        params.setText(text);
-        params.setCategories(categories);
-        params.setPaid(paid);
-        params.setRangeStart(rangeStart);
-        params.setRangeEnd(rangeEnd);
-        params.setOnlyAvailable(onlyAvailable);
-        params.setSort(sort);
-        params.setFrom(from);
-        params.setSize(size);
-        params.setIpAdr(resolveClientIp(request));
+            HttpServletRequest request) {
 
-        log.info("--> GET /events params={}", params);
-        List<EventShortDto> events = eventService.getPublic(params);
-        log.info("<-- GET /events returned {} items", events == null ? 0 : events.size());
+        if (from < 0) {
+            throw new EventsGetPublicBadRequestException();
+        }
+        if (size <= 0) {
+            throw new EventsGetPublicBadRequestException();
+        }
+        if (rangeStart != null && rangeEnd != null && rangeEnd.isBefore(rangeStart)) {
+            throw new EventsGetPublicBadRequestException();
+        }
+
+        PublicEventParams publicEventParams = new PublicEventParams();
+        publicEventParams.setText(text);
+        publicEventParams.setCategories(categories);
+        publicEventParams.setPaid(paid);
+        publicEventParams.setRangeStart(rangeStart);
+        publicEventParams.setRangeEnd(rangeEnd);
+        publicEventParams.setOnlyAvailable(onlyAvailable);
+        publicEventParams.setSort(sort);
+        publicEventParams.setFrom(from);
+        publicEventParams.setSize(size);
+        publicEventParams.setIpAdr(request.getRemoteAddr());
+
+        log.info("--> GET /events request with params {}", publicEventParams);
+        List<EventShortDto> events = eventService.getPublic(publicEventParams);
+        log.info("<-- GET /events response: {}", events);
 
         return ResponseEntity
                 .ok()
@@ -64,27 +72,20 @@ public class EventPublicController {
 
     @GetMapping("/{id}")
     public ResponseEntity<EventFullDto> getById(
+            @RequestHeader(value = "X-EWM-USER-ID", required = false) Long userId,
             @PathVariable("id") Long eventId,
-            HttpServletRequest request
-    ) {
-        PublicEventParams params = new PublicEventParams();
-        params.setIpAdr(resolveClientIp(request));
+            HttpServletRequest request) {
 
-        log.info("--> GET /events/{} ip={}", eventId, params.getIpAdr());
-        EventFullDto event = eventService.getByIdPublic(eventId, params);
-        log.info("<-- GET /events/{} returned", eventId);
+        PublicEventParams publicEventParams = new PublicEventParams();
+        publicEventParams.setIpAdr(request.getRemoteAddr());
+
+        log.info("--> GET /events/{} request, userId={}", eventId, userId);
+        EventFullDto event = eventService.getByIdPublic(userId, eventId, publicEventParams);
+        log.info("<-- GET /events/{} response: {}", eventId, event);
 
         return ResponseEntity
                 .ok()
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(event);
-    }
-
-    private String resolveClientIp(HttpServletRequest request) {
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            return xff.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }
