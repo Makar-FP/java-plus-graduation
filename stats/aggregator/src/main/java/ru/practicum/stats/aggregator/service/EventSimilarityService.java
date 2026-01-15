@@ -57,6 +57,24 @@ public class EventSimilarityService {
         return result;
     }
 
+    public void put(long eventA, long eventB, double similarity) {
+        long first = Math.min(eventA, eventB);
+        long second = Math.max(eventA, eventB);
+
+        similarityMatrix
+                .computeIfAbsent(first, e -> new ConcurrentHashMap<>())
+                .put(second, similarity);
+    }
+
+    public double get(long eventA, long eventB) {
+        long first = Math.min(eventA, eventB);
+        long second = Math.max(eventA, eventB);
+
+        return similarityMatrix
+                .computeIfAbsent(first, e -> new ConcurrentHashMap<>())
+                .getOrDefault(second, 0.0);
+    }
+
     private boolean upsertMax(ConcurrentMap<Long, Double> usersWeights, Long userId, double rating) {
         Double current = usersWeights.get(userId);
         if (current == null || rating > current) {
@@ -145,24 +163,6 @@ public class EventSimilarityService {
             case "ACTION_VIEW" -> 0.4;
             default -> 0.0;
         };
-    }
-
-    public void put(long eventA, long eventB, double similarity) {
-        long first = Math.min(eventA, eventB);
-        long second = Math.max(eventA, eventB);
-
-        similarityMatrix
-                .computeIfAbsent(first, e -> new ConcurrentHashMap<>())
-                .put(second, similarity);
-    }
-
-    public double get(long eventA, long eventB) {
-        long first = Math.min(eventA, eventB);
-        long second = Math.max(eventA, eventB);
-
-        return similarityMatrix
-                .computeIfAbsent(first, e -> new ConcurrentHashMap<>())
-                .getOrDefault(second, 0.0);
     }
 }
 
